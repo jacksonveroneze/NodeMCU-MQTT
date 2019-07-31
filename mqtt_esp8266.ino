@@ -1,26 +1,21 @@
 /*
   Basic ESP8266 MQTT example
-
   This sketch demonstrates the capabilities of the pubsub library in combination
   with the ESP8266 board/library.
-
   It connects to an MQTT server then:
   - publishes "hello world" to the topic "outTopic" every two seconds
   - subscribes to the topic "inTopic", printing out any messages
     it receives. NB - it assumes the received payloads are strings not binary
   - If the first character of the topic "inTopic" is an 1, switch ON the ESP Led,
     else switch it off
-
   It will reconnect to the server if the connection is lost using a blocking
   reconnect function. See the 'mqtt_reconnect_nonblocking' example for how to
   achieve the same result without blocking the main loop.
-
   To install the ESP8266 board, (using Arduino 1.6.4+):
   - Add the following 3rd party board manager under "File -> Preferences -> Additional Boards Manager URLs":
        http://arduino.esp8266.com/stable/package_esp8266com_index.json
   - Open the "Tools -> Board -> Board Manager" and click install for the ESP8266"
   - Select your ESP8266 in "Tools -> Board"
-
 */
 
 #include <ESP8266WiFi.h>
@@ -34,8 +29,9 @@ const char* password = "senhal@08ESCOL@";
 const char* mqtt_server = "broker.mqtt-dashboard.com";
 
 const char* topic_base_id = "123456";
-const char* topic_house_room_lamp = "house/room/lamp";
-const char* topic_house_room_temperature = "house/room/temperature";
+const char* topic_house_room1_lamp = "house/room1/lamp";
+const char* topic_house_room2_lamp = "house/room2/lamp";
+const char* topic_house_room3_lamp = "house/room3/lamp";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -48,6 +44,8 @@ int value = 0;
 void setup() {
   Serial.begin(115200);
   pinMode(D1, OUTPUT);
+  pinMode(D2, OUTPUT);
+  pinMode(D3, OUTPUT);
   setup_wifi();
 
   client.setServer(mqtt_server, 1883);
@@ -70,9 +68,6 @@ void loop() {
 
     client.publish("outTopic", msg);
   }
-
-  if (dht.broadcast(DHT11, D2)) layout();
-  delay(2000);  
 }
 
 void setup_wifi() {
@@ -105,14 +100,33 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   Serial.println();
 
-  // Switch on the LED if an 1 was received as first character
-  if ((char)payload[0] == '1') {
-    Serial.print("LED ativo");
-    digitalWrite(D1, HIGH);   // Turn the LED on (Note that LOW is the voltage level
-    // but actually the LED is on; this is because
-    // it is active low on the ESP-01)
-  } else {
-    digitalWrite(D1, LOW);  // Turn the LED off by making the voltage HIGH
+  String topicx(topic);
+  String str1(topic_house_room1_lamp);
+  String str2(topic_house_room2_lamp);
+  String str3(topic_house_room3_lamp);
+
+  if (topicx.equals(str1)) {
+    if ((char)payload[0] == '1') {
+      digitalWrite(D1, HIGH);
+    } else {
+      digitalWrite(D1, LOW);
+    }
+  }
+
+  if (topicx.equals(str2)) {
+    if ((char)payload[0] == '1') {
+      digitalWrite(D2, HIGH);
+    } else {
+      digitalWrite(D2, LOW);
+    }
+  }
+
+  if (topicx.equals(str3)) {
+    if ((char)payload[0] == '1') {
+      digitalWrite(D3, HIGH);
+    } else {
+      digitalWrite(D3, LOW);
+    }
   }
 
 }
@@ -129,7 +143,9 @@ void reconnect() {
 
       //client.publish("outTopic", "hello world");
 
-      client.subscribe(topic_house_room_lamp);
+      client.subscribe(topic_house_room1_lamp);
+      client.subscribe(topic_house_room2_lamp);
+      client.subscribe(topic_house_room3_lamp);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -147,6 +163,6 @@ void layout() {
 
 
 
-  client.publish(topic_house_room_temperature, String(dht.humidity).c_str(), true);
+  //client.publish(topic_house_room_temperature, String(dht.humidity).c_str(), true);
 
 }
