@@ -25,7 +25,7 @@
 // Update these with values suitable for your network.
 
 const char* ssid = "_JACKSON_2.4_";
-const char* password = "senhal@08ESCOL@";
+const char* password = "";
 const char* mqtt_server = "broker.mqtt-dashboard.com";
 
 const char* topic_base_id = "123456";
