@@ -1,77 +1,69 @@
-/*
-  Basic ESP8266 MQTT example
-  This sketch demonstrates the capabilities of the pubsub library in combination
-  with the ESP8266 board/library.
-  It connects to an MQTT server then:
-  - publishes "hello world" to the topic "outTopic" every two seconds
-  - subscribes to the topic "inTopic", printing out any messages
-    it receives. NB - it assumes the received payloads are strings not binary
-  - If the first character of the topic "inTopic" is an 1, switch ON the ESP Led,
-    else switch it off
-  It will reconnect to the server if the connection is lost using a blocking
-  reconnect function. See the 'mqtt_reconnect_nonblocking' example for how to
-  achieve the same result without blocking the main loop.
-  To install the ESP8266 board, (using Arduino 1.6.4+):
-  - Add the following 3rd party board manager under "File -> Preferences -> Additional Boards Manager URLs":
-       http://arduino.esp8266.com/stable/package_esp8266com_index.json
-  - Open the "Tools -> Board -> Board Manager" and click install for the ESP8266"
-  - Select your ESP8266 in "Tools -> Board"
-*/
-
+#include <time.h>
+#include <sys/time.h>
+#include <CronAlarms.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
-#include "SDHT.h"
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
-// Update these with values suitable for your network.
+#define activity_indicator D0
+#define saida_comando_valvula D1
+#define activity_indicator_led D2
 
-const char* ssid = "_JACKSON_2.4_";
+const char* ssid = "";
 const char* password = "";
 const char* mqtt_server = "broker.mqtt-dashboard.com";
+const char* topic_house_garden = "house/garden";
 
-const char* topic_base_id = "123456";
-const char* topic_house_room1_lamp = "house/room1/lamp";
-const char* topic_house_room2_lamp = "house/room2/lamp";
-const char* topic_house_room3_lamp = "house/room3/lamp";
+const long utcOffsetInSeconds = 3600;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-SDHT dht;
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "a.st1.ntp.br", utcOffsetInSeconds);
 
 long lastMsg = 0;
 char msg[50];
 int value = 0;
+bool isStart = false;
+bool allowCommandsMQTT = true;
 
 void setup() {
   Serial.begin(115200);
-  pinMode(D1, OUTPUT);
-  pinMode(D2, OUTPUT);
-  pinMode(D3, OUTPUT);
-  setup_wifi();
+
+  pinMode(activity_indicator, OUTPUT);
+  pinMode(saida_comando_valvula, OUTPUT);
+  pinMode(activity_indicator_led, OUTPUT);
+
+  setupWifi();
 
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
+
+  digitalWrite(activity_indicator, HIGH);
+
+  timeClient.begin();
+
+  configureDateTime();
+
+  //Cron.create("0 30 8 * * *", startx, false);
+  //Cron.create("*/120 * * * * *", startx, false);
+  //Cron.create("0 2 20 * * *", startx, false);
 }
 
-void loop() {
-  if (!client.connected()) {
-    reconnect();
-  }
-
-  client.loop();
-
-  long now = millis();
-
-  if (now - lastMsg > 2000) {
-    lastMsg = now;
-    ++value;
-    snprintf (msg, 50, "%ld", value);
-
-    client.publish("outTopic", msg);
-  }
+void startx() {
+  startStop(true, "Cron");
+  Cron.delay();
+  delay(5000);
+  startStop(false, "Cron");
 }
 
-void setup_wifi() {
+void setupWifi() {
+  if (WiFi.status() == WL_CONNECTED)
+    return;
+
   delay(10);
+
   Serial.println();
   Serial.print("Connecting to ");
   Serial.println(ssid);
@@ -85,67 +77,27 @@ void setup_wifi() {
 
   randomSeed(micros());
 
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
+  printData("--------------");
+  printData("WiFi connected");
+  printData("IP address: ");
+  printData(WiFi.localIP().toString());
 }
 
-void callback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
+void reconnectMQTT() {
+  if (client.connected())
+    return;
 
-  String topicx(topic);
-  String str1(topic_house_room1_lamp);
-  String str2(topic_house_room2_lamp);
-  String str3(topic_house_room3_lamp);
-
-  if (topicx.equals(str1)) {
-    if ((char)payload[0] == '1') {
-      digitalWrite(D1, HIGH);
-    } else {
-      digitalWrite(D1, LOW);
-    }
-  }
-
-  if (topicx.equals(str2)) {
-    if ((char)payload[0] == '1') {
-      digitalWrite(D2, HIGH);
-    } else {
-      digitalWrite(D2, LOW);
-    }
-  }
-
-  if (topicx.equals(str3)) {
-    if ((char)payload[0] == '1') {
-      digitalWrite(D3, HIGH);
-    } else {
-      digitalWrite(D3, LOW);
-    }
-  }
-
-}
-
-void reconnect() {
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
 
     String clientId = "ESP8266Client-";
+
     clientId += String(random(0xffff), HEX);
 
     if (client.connect(clientId.c_str())) {
       Serial.println("connected");
 
-      //client.publish("outTopic", "hello world");
-
-      client.subscribe(topic_house_room1_lamp);
-      client.subscribe(topic_house_room2_lamp);
-      client.subscribe(topic_house_room3_lamp);
+      client.subscribe(topic_house_garden);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -155,14 +107,68 @@ void reconnect() {
   }
 }
 
-void layout() {
-  Serial.print("   Humdity => ");
-  Serial.println(String(dht.humidity, 1));
-  Serial.print("   Celsius => ");
-  Serial.println(String(dht.celsius, 2));
+void loop() {
+  Cron.delay();
 
+  reconnectMQTT();
 
+  client.loop();
+}
 
-  //client.publish(topic_house_room_temperature, String(dht.humidity).c_str(), true);
+void callback(char* topic, byte * payload, unsigned int length) {
+  digitalWrite(activity_indicator, LOW);
+  delay(100);
+  digitalWrite(activity_indicator, HIGH);
 
+  printData("Message arrived [" + String(topic) + "] - " + String((char)payload[0]));
+
+  String topicx(topic);
+  String str1(topic_house_garden);
+
+  if (topicx.equals(str1) && ((char)payload[0] == '0' || (char)payload[0] == '1')) {
+    startStop((char)payload[0] == '1', "MQTT");
+  }
+}
+
+void startStop(bool startProcess, String source) {
+  if (startProcess == true) {
+    digitalWrite(saida_comando_valvula, HIGH);
+    digitalWrite(activity_indicator_led, HIGH);
+
+    printData("Irrigate(" + source + "): start");
+  }
+  else {
+    digitalWrite(saida_comando_valvula, LOW);
+    digitalWrite(activity_indicator_led, LOW);
+
+    printData("Irrigate(" + source + "): stop");
+  }
+}
+
+void configureDateTime() {
+  timeClient.update();
+
+  struct tm tm_newtime;
+  tm_newtime.tm_year = 2011 - 1900;
+  tm_newtime.tm_mon = 1 - 1;
+  tm_newtime.tm_mday = timeClient.getDay();
+  tm_newtime.tm_hour = timeClient.getHours();
+  tm_newtime.tm_min = timeClient.getMinutes();
+  tm_newtime.tm_sec = timeClient.getSeconds();
+  tm_newtime.tm_isdst = 0;
+  timeval tv = { mktime(&tm_newtime), 0 };
+  timezone tz = { 0, 0};
+  settimeofday(&tv, &tz);
+
+  time_t tnow = time(nullptr);
+  Serial.println(asctime(gmtime(&tnow)));
+}
+
+void printData(String data) {
+  time_t tnow = time(nullptr);
+  Serial.println("");
+  Serial.print(asctime(gmtime(&tnow)));
+  Serial.print(" -> ");
+  Serial.print(data);
+  Serial.println("");
 }
